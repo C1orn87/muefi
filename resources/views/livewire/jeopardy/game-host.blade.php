@@ -1,0 +1,305 @@
+<div class="min-h-screen bg-[#042B7F] text-white p-4 flex flex-col gap-4"
+     x-data="hostBuzzer(@entangle('activeQuestionId'), {{ $session->buzzer_delay_seconds ?? 3 }})">
+
+    {{-- ══ TOP BAR ══ --}}
+    <div class="flex flex-wrap items-center justify-between gap-3 bg-blue-900 rounded-2xl px-5 py-3 shadow">
+        <div>
+            <span class="text-yellow-400 font-extrabold text-lg tracking-widest uppercase" style="font-family:serif;">JEOPARDY!</span>
+            <span class="text-blue-300 text-sm ml-3">{{ $session->board->name }}</span>
+        </div>
+
+        {{-- Point percentage toggle --}}
+        <div class="flex items-center gap-2">
+            <span class="text-blue-300 text-xs uppercase tracking-wide font-medium">Award:</span>
+            @foreach([100, 50, 0] as $pct)
+                <button wire:click="setPercentage({{ $pct }})"
+                        class="px-4 py-1.5 rounded-xl font-bold text-sm transition-colors
+                               {{ $session->point_percentage === $pct
+                                  ? 'bg-yellow-400 text-blue-900'
+                                  : 'bg-blue-700 text-blue-200 hover:bg-blue-600' }}">
+                    {{ $pct }}%
+                </button>
+            @endforeach
+        </div>
+
+        {{-- Game controls --}}
+        <div class="flex items-center gap-2">
+            <span class="text-blue-300 text-xs">
+                Join: <span class="font-bold text-white">{{ url('/games/jeopardy/join/'.$session->code) }}</span>
+            </span>
+            <button wire:click="endGame"
+                    onclick="return confirm('End the game?')"
+                    class="bg-red-600 hover:bg-red-500 text-white text-xs px-4 py-1.5 rounded-xl font-semibold">
+                End Game
+            </button>
+        </div>
+    </div>
+
+    <div class="flex gap-4 flex-1">
+
+        {{-- ══ BOARD ══ --}}
+        <div class="flex-1">
+            @php $categories = $session->board->categories; @endphp
+
+            {{-- Category headers --}}
+            <div class="grid gap-2 mb-2" style="grid-template-columns: repeat({{ count($categories) }}, minmax(0, 1fr))">
+                @foreach($categories as $cat)
+                    <div class="bg-blue-800 text-yellow-400 font-bold text-center text-sm py-3 px-2 rounded-xl uppercase tracking-wide">
+                        {{ $cat->name }}
+                    </div>
+                @endforeach
+            </div>
+
+            {{-- Question cells --}}
+            @php
+                $maxRows = $categories->map(fn($c) => $c->questions->count())->max() ?? 0;
+            @endphp
+            @for($row = 0; $row < $maxRows; $row++)
+                <div class="grid gap-2 mb-2" style="grid-template-columns: repeat({{ count($categories) }}, minmax(0, 1fr))">
+                    @foreach($categories as $cat)
+                        @php $q = $cat->questions->get($row); @endphp
+                        @if($q)
+                            @php
+                                $isRevealed = in_array($q->id, $revealedIds);
+                                $isActive   = $session->active_question_id === $q->id;
+                            @endphp
+                            <button wire:click="selectQuestion({{ $q->id }})"
+                                    @if($isRevealed && !$isActive) disabled @endif
+                                    class="py-5 rounded-xl font-extrabold text-xl transition-all
+                                           {{ $isActive
+                                               ? 'bg-yellow-400 text-blue-900 ring-4 ring-white'
+                                               : ($isRevealed
+                                                  ? 'bg-blue-950 text-blue-900 cursor-not-allowed opacity-40'
+                                                  : 'bg-blue-700 text-yellow-300 hover:bg-blue-600 hover:scale-105') }}">
+                                ${{ $q->points }}
+                            </button>
+                        @else
+                            <div class="py-5 rounded-xl bg-blue-950 opacity-20"></div>
+                        @endif
+                    @endforeach
+                </div>
+            @endfor
+        </div>
+
+        {{-- ══ RIGHT PANEL ══ --}}
+        <div class="w-96 flex flex-col gap-4">
+
+            {{-- ── Active question ── --}}
+            @if($session->activeQuestion)
+                @php $aq = $session->activeQuestion; @endphp
+                @php
+                    $sq = $session->sessionQuestions->firstWhere('question_id', $aq->id);
+                    $zoomLevel = $sq ? $sq->zoom_level : 4;
+                    $zoomPct   = $zoomLevel * 100;
+                @endphp
+                <div class="bg-blue-800 rounded-2xl p-4 flex flex-col gap-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-yellow-400 font-bold">${{ $aq->points }}</span>
+                        <div class="flex gap-2">
+                            <button wire:click="toggleAnswer"
+                                    class="text-xs px-3 py-1 rounded-lg transition-colors
+                                           {{ $showAnswer ? 'bg-green-600 hover:bg-green-500' : 'bg-blue-600 hover:bg-blue-500' }}">
+                                {{ $showAnswer ? '✓ Hide answer' : 'Show answer' }}
+                            </button>
+                            <button wire:click="closeQuestion"
+                                    class="text-xs px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500">
+                                ✕ Close
+                            </button>
+                        </div>
+                    </div>
+
+                    {{-- Question content --}}
+                    <div class="bg-[#042B7F] rounded-xl p-3 min-h-[100px] flex flex-col gap-2">
+
+                        @if($aq->question_text)
+                            <p class="text-white text-sm">{{ $aq->question_text }}</p>
+                        @endif
+
+                        @if($aq->question_type === 'image')
+                            <img src="{{ Storage::url($aq->media_path) }}" alt="Question image"
+                                 class="rounded-lg max-h-40 object-contain mx-auto">
+
+                        @elseif($aq->question_type === 'zoom_image')
+                            <div class="relative overflow-hidden rounded-lg h-40 bg-black flex items-center justify-center">
+                                <img src="{{ Storage::url($aq->media_path) }}" alt="Zoom image"
+                                     class="transition-transform duration-500 object-cover w-full h-full"
+                                     style="transform: scale({{ $zoomLevel }}); transform-origin: center center;">
+                            </div>
+                            @if($zoomLevel > 1)
+                                <button wire:click="zoomIn"
+                                        class="bg-yellow-400 text-blue-900 font-bold text-sm px-4 py-2 rounded-xl hover:bg-yellow-300 transition-colors">
+                                    🔍 Reveal more ({{ $zoomPct }}% → {{ ($zoomLevel - 1) * 100 }}%)
+                                </button>
+                            @endif
+
+                        @elseif($aq->question_type === 'audio')
+                            <audio controls class="w-full">
+                                <source src="{{ Storage::url($aq->media_path) }}">
+                            </audio>
+
+                        @elseif($aq->question_type === 'video')
+                            <video controls class="w-full rounded-lg max-h-40">
+                                <source src="{{ Storage::url($aq->media_path) }}">
+                            </video>
+
+                        @elseif($aq->question_type === 'youtube')
+                            @php $embedUrl = $aq->youtubeEmbedUrl(); @endphp
+                            @if($embedUrl)
+                                <iframe src="{{ $embedUrl }}" class="w-full h-36 rounded-lg"
+                                        allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                            @endif
+                        @endif
+
+                        {{-- Answer reveal --}}
+                        @if($showAnswer && $aq->answer_text)
+                            <div class="mt-2 bg-green-800 text-green-100 rounded-lg px-3 py-2 text-sm font-semibold">
+                                ✓ {{ $aq->answer_text }}
+                            </div>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- ── Buzzer panel ── --}}
+                <div class="bg-blue-800 rounded-2xl p-4 flex flex-col gap-3">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-yellow-400 font-bold uppercase tracking-wide text-xs">Buzzer</h3>
+                        <div class="flex items-center gap-2">
+                            {{-- Countdown badge --}}
+                            <span x-show="countdown > 0"
+                                  x-text="'Opens in ' + countdown + 's'"
+                                  class="text-xs text-blue-300 bg-blue-700 rounded-lg px-2 py-1"></span>
+                            {{-- Status badge --}}
+                            @if($session->buzzer_open)
+                                <span class="text-xs bg-green-600 text-white rounded-lg px-2 py-1 font-semibold">OPEN</span>
+                            @else
+                                <span class="text-xs bg-red-700 text-white rounded-lg px-2 py-1 font-semibold" x-show="countdown <= 0">CLOSED</span>
+                            @endif
+                            <button wire:click="reopenBuzzer"
+                                    class="text-xs px-3 py-1 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-blue-900 font-semibold">
+                                ↺ Reopen
+                            </button>
+                        </div>
+                    </div>
+
+                    {{-- Buzz queue --}}
+                    @if($buzzes->isNotEmpty())
+                        <ol class="space-y-1">
+                            @foreach($buzzes as $i => $buzz)
+                                <li class="flex items-center gap-2 bg-blue-700 rounded-xl px-3 py-2">
+                                    <span class="text-yellow-400 font-extrabold text-sm w-5 text-center">{{ $i + 1 }}</span>
+                                    <span class="text-white text-sm font-medium">{{ $buzz->player->name }}</span>
+                                    <span class="text-blue-300 text-xs ml-auto">{{ $buzz->buzzed_at->format('H:i:s') }}</span>
+                                </li>
+                            @endforeach
+                        </ol>
+                    @else
+                        <p class="text-blue-400 text-xs text-center">No buzzes yet.</p>
+                    @endif
+                </div>
+
+                {{-- ── Number guess results ── --}}
+                @if($aq->question_type === 'number_guess' && $guesses->isNotEmpty())
+                    <div class="bg-blue-800 rounded-2xl p-4 flex flex-col gap-2">
+                        <h3 class="text-yellow-400 font-bold uppercase tracking-wide text-xs mb-1">
+                            Guesses
+                            @if($aq->answer_text)
+                                <span class="text-blue-300 normal-case ml-1">(answer: {{ $aq->answer_text }})</span>
+                            @endif
+                        </h3>
+                        @foreach($guesses as $i => $guess)
+                            <div class="flex items-center gap-2 bg-blue-700 rounded-xl px-3 py-2">
+                                <span class="text-yellow-400 font-bold text-sm w-5 text-center">{{ $i + 1 }}</span>
+                                <span class="text-white text-sm font-medium flex-1">{{ $guess->player->name }}</span>
+                                <span class="text-yellow-300 font-bold text-sm">{{ number_format($guess->guess, 2) }}</span>
+                                @if($aq->answer_text)
+                                    @php $diff = abs($guess->guess - (float)$aq->answer_text); @endphp
+                                    <span class="text-blue-300 text-xs ml-1">
+                                        ±{{ number_format($diff, 2) }}
+                                    </span>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+
+            @else
+                <div class="bg-blue-800 rounded-2xl p-4 text-blue-300 text-sm text-center">
+                    Click a cell on the board to open a question.
+                </div>
+            @endif
+
+            {{-- ── Score panel ── --}}
+            <div class="bg-blue-800 rounded-2xl p-4 flex-1 overflow-y-auto">
+                <h3 class="text-yellow-400 font-bold uppercase tracking-wide text-xs mb-3">Scoreboard</h3>
+
+                {{-- Solo players --}}
+                @php $soloPlayers = $session->players->whereNull('team_id'); @endphp
+                @foreach($soloPlayers as $player)
+                    <div class="flex items-center justify-between mb-2 bg-blue-700 rounded-xl px-3 py-2">
+                        <span class="text-sm font-medium truncate">{{ $player->name }}</span>
+                        <div class="flex items-center gap-1">
+                            <button wire:click="adjustPlayerScore({{ $player->id }}, '-')"
+                                    class="w-7 h-7 rounded-lg bg-red-600 hover:bg-red-500 font-bold text-sm">−</button>
+                            <span class="text-yellow-300 font-bold w-14 text-center">${{ number_format($player->score) }}</span>
+                            <button wire:click="adjustPlayerScore({{ $player->id }}, '+')"
+                                    class="w-7 h-7 rounded-lg bg-green-600 hover:bg-green-500 font-bold text-sm">+</button>
+                        </div>
+                    </div>
+                @endforeach
+
+                {{-- Teams --}}
+                @foreach($session->teams as $team)
+                    <div class="mb-3">
+                        <div class="flex items-center justify-between bg-blue-600 rounded-xl px-3 py-2 mb-1">
+                            <span class="text-yellow-400 text-xs font-bold uppercase tracking-wide">{{ $team->name }}</span>
+                            <span class="text-yellow-300 font-bold">${{ number_format($team->score) }}</span>
+                        </div>
+                        @foreach($team->players as $player)
+                            <div class="flex items-center justify-between ml-3 mb-1 bg-blue-700 rounded-xl px-3 py-1.5">
+                                <span class="text-xs truncate">{{ $player->name }}</span>
+                                <div class="flex items-center gap-1">
+                                    <button wire:click="adjustPlayerScore({{ $player->id }}, '-')"
+                                            class="w-6 h-6 rounded-lg bg-red-600 hover:bg-red-500 font-bold text-xs">−</button>
+                                    <span class="text-yellow-300 font-bold text-xs w-12 text-center">${{ number_format($player->score) }}</span>
+                                    <button wire:click="adjustPlayerScore({{ $player->id }}, '+')"
+                                            class="w-6 h-6 rounded-lg bg-green-600 hover:bg-green-500 font-bold text-xs">+</button>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                @endforeach
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+@script
+<script>
+    Alpine.data('hostBuzzer', (activeQuestionIdRef, delaySeconds) => ({
+        countdown: 0,
+        timer: null,
+        activeQuestionId: activeQuestionIdRef,
+
+        init() {
+            this.$watch('activeQuestionId', (newId) => {
+                clearInterval(this.timer);
+                this.countdown = 0;
+
+                if (newId) {
+                    this.countdown = delaySeconds;
+                    this.timer = setInterval(() => {
+                        this.countdown--;
+                        if (this.countdown <= 0) {
+                            clearInterval(this.timer);
+                            this.countdown = 0;
+                            $wire.openBuzzer();
+                        }
+                    }, 1000);
+                }
+            });
+        },
+    }));
+</script>
+@endscript
