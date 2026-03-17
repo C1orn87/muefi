@@ -36,17 +36,18 @@ class GameHost extends Component
     {
         JeopardySessionQuestion::updateOrCreate(
             ['session_id' => $this->session->id, 'question_id' => $questionId],
-            ['is_revealed' => true]
+            ['is_revealed' => true, 'pixelate_level' => 1]
         );
 
         // Clear buzzes and reset all flags for the fresh question
         $this->session->buzzes()->where('question_id', $questionId)->delete();
 
         $this->session->update([
-            'active_question_id' => $questionId,
-            'show_answer'        => false,
-            'buzzer_open'        => false,
-            'question_opened_at' => now(),
+            'active_question_id'  => $questionId,
+            'show_answer'         => false,
+            'buzzer_open'         => false,
+            'question_opened_at'  => now(),
+            'revealed_hint_count' => 0,
         ]);
 
         $this->session->refresh();
@@ -59,16 +60,97 @@ class GameHost extends Component
     public function closeQuestion(): void
     {
         $this->session->update([
-            'active_question_id' => null,
-            'show_answer'        => false,
-            'buzzer_open'        => false,
-            'question_opened_at' => null,
+            'active_question_id'  => null,
+            'show_answer'         => false,
+            'buzzer_open'         => false,
+            'question_opened_at'  => null,
+            'pending_question_id' => null,
+            'revealed_hint_count' => 0,
         ]);
         $this->session->refresh();
         $this->activeQuestionId = null;
         $this->showAnswer       = false;
 
+        // Auto-advance to the next player's turn
+        $this->advanceTurn();
+
         event(new GameStateUpdated($this->session->code, 'active'));
+    }
+
+    // ── Turn management ────────────────────────────────────────────────────────
+
+    /** Cycle to the next player in join order. */
+    public function advanceTurn(): void
+    {
+        $players = $this->session->players->sortBy('id')->values();
+
+        if ($players->isEmpty()) {
+            return;
+        }
+
+        $currentId    = $this->session->current_turn_player_id;
+        $currentIndex = $players->search(fn ($p) => $p->id === $currentId);
+        $nextIndex    = ($currentIndex === false) ? 0 : ($currentIndex + 1) % $players->count();
+        $nextPlayer   = $players[$nextIndex];
+
+        $this->session->update([
+            'current_turn_player_id' => $nextPlayer->id,
+            'pending_question_id'    => null,
+        ]);
+        $this->session->refresh();
+
+        event(new GameStateUpdated($this->session->code, 'active'));
+    }
+
+    /** Host manually sets whose turn it is. */
+    public function setTurn(int $playerId): void
+    {
+        $this->session->update([
+            'current_turn_player_id' => $playerId,
+            'pending_question_id'    => null,
+        ]);
+        $this->session->refresh();
+
+        event(new GameStateUpdated($this->session->code, 'active'));
+    }
+
+    // ── Hints ──────────────────────────────────────────────────────────────────
+
+    /** Reveal the next hint to players. */
+    public function showNextHint(): void
+    {
+        $q = $this->session->activeQuestion;
+        if (! $q) {
+            return;
+        }
+
+        $hints = $q->hints ?? [];
+        if ($this->session->revealed_hint_count < count($hints)) {
+            $this->session->increment('revealed_hint_count');
+            $this->session->refresh();
+            event(new GameStateUpdated($this->session->code, 'active'));
+        }
+    }
+
+    // ── Pixelate reveal ────────────────────────────────────────────────────────
+
+    /** Step the pixelate_image one level clearer (1 = most pixelated, 8 = full). */
+    public function pixelateReveal(): void
+    {
+        if (! $this->session->active_question_id) {
+            return;
+        }
+
+        $sq = JeopardySessionQuestion::where('session_id', $this->session->id)
+            ->where('question_id', $this->session->active_question_id)
+            ->first();
+
+        if ($sq && $sq->pixelate_level < 11) { // 11 Fibonacci steps (1→100%)
+            $sq->update(['pixelate_level' => $sq->pixelate_level + 1]);
+        }
+
+        $this->session->refresh();
+        event(new QuestionRevealed($this->session->code, $this->session->active_question_id));
     }
 
     // ── Answer reveal ──────────────────────────────────────────────────────────
@@ -180,6 +262,8 @@ class GameHost extends Component
             'teams.players',
             'sessionQuestions',
             'activeQuestion',
+            'currentTurnPlayer',
+            'pendingQuestion',
         ]);
 
         $revealedIds = $this->session->revealedQuestionIds();
@@ -201,6 +285,11 @@ class GameHost extends Component
                 ->values()
             : collect();
 
-        return view('livewire.jeopardy.game-host', compact('revealedIds', 'buzzes', 'guesses'));
+        $pendingQuestion   = $this->session->pendingQuestion;
+        $currentTurnPlayer = $this->session->currentTurnPlayer;
+
+        return view('livewire.jeopardy.game-host', compact(
+            'revealedIds', 'buzzes', 'guesses', 'pendingQuestion', 'currentTurnPlayer'
+        ));
     }
 }

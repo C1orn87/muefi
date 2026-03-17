@@ -26,13 +26,15 @@ class BoardBuilder extends Component
      *     'name'      => string,
      *     'questions' => [
      *       [
-     *         'points'        => int,
-     *         'question_text' => string,
-     *         'answer_text'   => string,
-     *         'question_type' => 'text'|'image'|'zoom_image'|'audio'|'video'|'youtube',
-     *         'media_url'     => string|null,   // for youtube
-     *         'media_file'    => UploadedFile|null, // temp upload
-     *         'media_path'    => string|null,   // saved path
+     *         'points'         => int,
+     *         'question_text'  => string,
+     *         'answer_text'    => string,
+     *         'question_type'  => 'text'|'image'|'zoom_image'|'pixelate_image'|'audio'|'video'|'youtube'|'number_guess',
+     *         'media_url'      => string|null,   // for youtube
+     *         'media_file'     => UploadedFile|null, // temp upload
+     *         'media_path'     => string|null,   // saved path
+     *         'hints_enabled'  => bool,
+     *         'hints'          => string[],      // ordered list of hint strings
      *       ],
      *       ...
      *     ],
@@ -54,6 +56,7 @@ class BoardBuilder extends Component
             foreach ($board->categories as $cat) {
                 $questions = [];
                 foreach ($cat->questions as $q) {
+                    $hints = $q->hints ?? [];
                     $questions[] = [
                         'points'        => $q->points,
                         'question_text' => $q->question_text ?? '',
@@ -62,6 +65,8 @@ class BoardBuilder extends Component
                         'media_url'     => $q->media_url     ?? '',
                         'media_file'    => null,
                         'media_path'    => $q->media_path    ?? '',
+                        'hints_enabled' => ! empty($hints),
+                        'hints'         => $hints,
                     ];
                 }
                 $this->categories[] = ['name' => $cat->name, 'questions' => $questions];
@@ -102,6 +107,20 @@ class BoardBuilder extends Component
         array_splice($this->categories[$catIdx]['questions'], $qIdx, 1);
     }
 
+    // ── Hint management ───────────────────────────────────────────────────────
+
+    public function addHint(int $catIdx, int $qIdx): void
+    {
+        $this->categories[$catIdx]['questions'][$qIdx]['hints'][] = '';
+    }
+
+    public function removeHint(int $catIdx, int $qIdx, int $hintIdx): void
+    {
+        array_splice($this->categories[$catIdx]['questions'][$qIdx]['hints'], $hintIdx, 1);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     protected function blankQuestion(int $points): array
     {
         return [
@@ -112,6 +131,8 @@ class BoardBuilder extends Component
             'media_url'     => '',
             'media_file'    => null,
             'media_path'    => '',
+            'hints_enabled' => false,
+            'hints'         => [],
         ];
     }
 
@@ -127,7 +148,7 @@ class BoardBuilder extends Component
             'categories.*.questions.*.points'   => 'required|integer|min:1',
             'categories.*.questions.*.question_text' => 'nullable|string',
             'categories.*.questions.*.answer_text'   => 'nullable|string',
-            'categories.*.questions.*.question_type' => 'required|in:text,image,zoom_image,audio,video,youtube,number_guess',
+            'categories.*.questions.*.question_type' => 'required|in:text,image,zoom_image,pixelate_image,audio,video,youtube,number_guess',
             'categories.*.questions.*.media_url'     => 'nullable|url',
         ]);
 
@@ -162,15 +183,19 @@ class BoardBuilder extends Component
                 $mediaPath = $qData['media_path'] ?? null;
                 if (! empty($qData['media_file'])) {
                     $file = $qData['media_file'];
-                    // Determine sub-folder by type
                     $folder = match ($qData['question_type']) {
-                        'image', 'zoom_image' => 'jeopardy/images',
-                        'audio'               => 'jeopardy/audio',
-                        'video'               => 'jeopardy/video',
-                        default               => 'jeopardy/misc',
+                        'image', 'zoom_image', 'pixelate_image' => 'jeopardy/images',
+                        'audio'                                  => 'jeopardy/audio',
+                        'video'                                  => 'jeopardy/video',
+                        default                                  => 'jeopardy/misc',
                     };
                     $mediaPath = $file->store($folder, 'public');
                 }
+
+                // Only persist hints if the hints toggle is enabled
+                $hints = (! empty($qData['hints_enabled']) && ! empty($qData['hints']))
+                    ? array_values(array_filter($qData['hints'], fn ($h) => trim($h) !== ''))
+                    : null;
 
                 JeopardyQuestion::create([
                     'category_id'   => $category->id,
@@ -181,6 +206,7 @@ class BoardBuilder extends Component
                     'question_type' => $qData['question_type'],
                     'media_path'    => $mediaPath,
                     'media_url'     => $qData['media_url'] ?? null,
+                    'hints'         => $hints,
                 ]);
             }
         }

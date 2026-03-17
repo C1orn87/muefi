@@ -12,6 +12,8 @@ class JeopardySession extends Model
     protected $fillable = [
         'board_id', 'host_id', 'code', 'status', 'point_percentage', 'active_question_id',
         'show_answer', 'buzzer_open', 'question_opened_at', 'buzzer_delay_seconds',
+        'current_turn_player_id', 'pending_question_id',
+        'revealed_hint_count',
     ];
 
     protected $casts = [
@@ -47,6 +49,16 @@ class JeopardySession extends Model
     public function activeQuestion(): BelongsTo
     {
         return $this->belongsTo(JeopardyQuestion::class, 'active_question_id');
+    }
+
+    public function currentTurnPlayer(): BelongsTo
+    {
+        return $this->belongsTo(JeopardyPlayer::class, 'current_turn_player_id');
+    }
+
+    public function pendingQuestion(): BelongsTo
+    {
+        return $this->belongsTo(JeopardyQuestion::class, 'pending_question_id');
     }
 
     public function sessionQuestions(): HasMany

@@ -12,6 +12,11 @@ class JeopardyQuestion extends Model
         'category_id', 'points', 'order',
         'question_text', 'answer_text',
         'question_type', 'media_path', 'media_url',
+        'hints',
+    ];
+
+    protected $casts = [
+        'hints' => 'array',
     ];
 
     public function category(): BelongsTo

@@ -88,6 +88,7 @@
                                     <option value="text">Text only</option>
                                     <option value="image">Image</option>
                                     <option value="zoom_image">Zoom image</option>
+                                    <option value="pixelate_image">🎨 Pixelated image</option>
                                     <option value="audio">Audio</option>
                                     <option value="video">Video</option>
                                     <option value="youtube">YouTube</option>
@@ -105,8 +106,8 @@
                                        placeholder="{{ $category['questions'][$qIdx]['question_type'] === 'number_guess' ? 'Correct number…' : 'Answer…' }}"
                                        class="w-full border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 text-gray-900 dark:text-zinc-100 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-teal-400">
 
-                                {{-- Media upload for image/audio/video --}}
-                                @if(in_array($category['questions'][$qIdx]['question_type'], ['image','zoom_image','audio','video']))
+                                {{-- Media upload for image/audio/video/pixelate --}}
+                                @if(in_array($category['questions'][$qIdx]['question_type'], ['image','zoom_image','pixelate_image','audio','video']))
                                     <div>
                                         <label class="block text-xs text-gray-500 dark:text-zinc-400 mb-1">
                                             Upload media
@@ -117,10 +118,10 @@
                                         <input wire:model="categories.{{ $catIdx }}.questions.{{ $qIdx }}.media_file"
                                                type="file"
                                                accept="{{ match($category['questions'][$qIdx]['question_type']) {
-                                                   'image','zoom_image' => 'image/*',
-                                                   'audio'             => 'audio/*',
-                                                   'video'             => 'video/*',
-                                                   default             => '*'
+                                                   'image','zoom_image','pixelate_image' => 'image/*',
+                                                   'audio'                               => 'audio/*',
+                                                   'video'                               => 'video/*',
+                                                   default                               => '*'
                                                } }}"
                                                class="text-xs text-gray-600 dark:text-zinc-300 w-full">
                                     </div>
@@ -132,6 +133,43 @@
                                            type="url" placeholder="https://youtube.com/watch?v=…"
                                            class="w-full border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 text-gray-900 dark:text-zinc-100 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-teal-400">
                                 @endif
+
+                                {{-- ── Hints ── --}}
+                                <div class="border-t border-gray-200 dark:border-zinc-700 pt-2 mt-1">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <input wire:model.live="categories.{{ $catIdx }}.questions.{{ $qIdx }}.hints_enabled"
+                                               type="checkbox"
+                                               id="hints_{{ $catIdx }}_{{ $qIdx }}"
+                                               class="w-3.5 h-3.5 accent-amber-500">
+                                        <label for="hints_{{ $catIdx }}_{{ $qIdx }}"
+                                               class="text-xs font-semibold text-amber-600 dark:text-amber-400 cursor-pointer select-none">
+                                            💡 Enable hints
+                                        </label>
+                                    </div>
+
+                                    @if(!empty($category['questions'][$qIdx]['hints_enabled']))
+                                        <div class="space-y-1 pl-1">
+                                            @foreach($category['questions'][$qIdx]['hints'] ?? [] as $hintIdx => $hint)
+                                                <div class="flex items-center gap-1">
+                                                    <span class="text-[10px] text-amber-500 font-bold w-4 text-center flex-shrink-0">
+                                                        {{ $hintIdx + 1 }}
+                                                    </span>
+                                                    <input wire:model="categories.{{ $catIdx }}.questions.{{ $qIdx }}.hints.{{ $hintIdx }}"
+                                                           type="text"
+                                                           placeholder="Hint {{ $hintIdx + 1 }}…"
+                                                           class="flex-1 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-gray-900 dark:text-zinc-100 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400">
+                                                    <button wire:click="removeHint({{ $catIdx }}, {{ $qIdx }}, {{ $hintIdx }})"
+                                                            class="text-red-400 hover:text-red-600 text-xs flex-shrink-0 px-1">✕</button>
+                                                </div>
+                                            @endforeach
+
+                                            <button wire:click="addHint({{ $catIdx }}, {{ $qIdx }})"
+                                                    class="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-xs font-medium mt-1">
+                                                + Add hint
+                                            </button>
+                                        </div>
+                                    @endif
+                                </div>
 
                             </div>
                         @endforeach

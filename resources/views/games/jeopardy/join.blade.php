@@ -1,4 +1,4 @@
-@extends('layouts.app')
+@extends('layouts.game')
 
 @section('content')
 <div class="min-h-screen bg-[#042B7F] flex items-center justify-center px-4 py-10">

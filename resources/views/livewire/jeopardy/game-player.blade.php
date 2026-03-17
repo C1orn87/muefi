@@ -18,9 +18,12 @@
     {{-- ── Active question ── --}}
     @elseif($session->activeQuestion)
         @php
-            $aq        = $session->activeQuestion;
-            $sq        = $session->sessionQuestions->firstWhere('question_id', $aq->id);
-            $zoomLevel = $sq ? $sq->zoom_level : 4;
+            $aq            = $session->activeQuestion;
+            $sq            = $session->sessionQuestions->firstWhere('question_id', $aq->id);
+            $zoomLevel     = $sq ? $sq->zoom_level    : 4;
+            $pixLevel      = $sq ? $sq->pixelate_level : 1;
+            $hints         = $aq->hints ?? [];
+            $revealedHints = $session->revealed_hint_count ?? 0;
         @endphp
         <div class="flex-1 flex flex-col items-center justify-center gap-4 p-4 relative">
 
@@ -53,6 +56,21 @@
                              style="transform: scale({{ $zoomLevel }}); transform-origin: center center;">
                     </div>
 
+                @elseif($aq->question_type === 'pixelate_image')
+                    {{-- wire:key on the canvas itself: different key = element replaced,
+                         Alpine re-inits with new level. wire:ignore prevents Livewire
+                         from morphing the canvas during polls (or any other re-render
+                         where the question/level hasn't changed), which would trigger
+                         Alpine re-init and erase the drawn pixels. --}}
+                    <canvas
+                        wire:key="pixelate-{{ $aq->id }}-{{ $pixLevel }}"
+                        wire:ignore
+                        x-data="pixelateImg('{{ Storage::url($aq->media_path) }}', {{ $pixLevel }})"
+                        x-init="draw()"
+                        class="rounded-xl w-full"
+                        style="max-height:256px; image-rendering: pixelated; image-rendering: crisp-edges;">
+                    </canvas>
+
                 @elseif($aq->question_type === 'audio')
                     <audio controls class="w-full mt-2">
                         <source src="{{ Storage::url($aq->media_path) }}">
@@ -71,6 +89,21 @@
                     @endif
                 @endif
             </div>
+
+            {{-- ── Revealed hints ── --}}
+            @if($revealedHints > 0 && count($hints) > 0)
+                <div class="w-full max-w-lg bg-amber-900/40 border border-amber-600/50 rounded-2xl px-4 py-3">
+                    <p class="text-amber-400 text-xs font-bold uppercase tracking-wide mb-2">💡 Hints</p>
+                    <div class="space-y-1">
+                        @foreach(array_slice($hints, 0, $revealedHints) as $hIdx => $hintText)
+                            <div class="flex items-start gap-2 text-sm text-amber-100">
+                                <span class="text-amber-400 font-bold flex-shrink-0">{{ $hIdx + 1 }}.</span>
+                                <span>{{ $hintText }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
 
             {{-- ── Buzzer button ── --}}
             @if($aq->question_type !== 'number_guess')
@@ -125,10 +158,39 @@
 
         </div>
 
-    {{-- ── Lobby/board view ── --}}
+    {{-- ── Board / turn view ── --}}
     @else
-        <div class="flex-1 p-4">
+        <div class="flex-1 p-4 pb-0">
             @php $categories = $session->board->categories; @endphp
+
+            {{-- ── Turn banner ── --}}
+            @if($session->current_turn_player_id)
+                @if($isMyTurn)
+                    <div class="mb-3 bg-yellow-400 text-blue-900 rounded-2xl px-4 py-3 flex items-center gap-3">
+                        <span class="text-2xl">⭐</span>
+                        <div>
+                            <p class="font-extrabold text-lg leading-tight">It's your turn!</p>
+                            <p class="text-sm font-medium opacity-75">Pick a card below or tap Random</p>
+                        </div>
+                    </div>
+                @else
+                    <div class="mb-3 bg-blue-800 text-white rounded-2xl px-4 py-3 flex items-center gap-3">
+                        <span class="text-2xl">🎯</span>
+                        <div>
+                            <p class="text-blue-300 text-xs uppercase tracking-wide font-semibold">Currently picking…</p>
+                            <p class="font-bold text-base">{{ $currentTurnPlayer?->name ?? 'Someone' }}</p>
+                        </div>
+                    </div>
+                @endif
+            @endif
+
+            {{-- ── Pending selection feedback (only visible to the picking player) ── --}}
+            @if($isMyTurn && $pendingQuestionId)
+                <div class="mb-3 bg-green-700 text-white rounded-2xl px-4 py-2 flex items-center gap-2 text-sm font-semibold">
+                    <span>✅</span>
+                    <span>Card selected — waiting for the host to open it…</span>
+                </div>
+            @endif
 
             {{-- Category headers --}}
             <div class="grid gap-2 mb-2" style="grid-template-columns: repeat({{ count($categories) }}, minmax(0, 1fr))">
@@ -145,13 +207,27 @@
                     @foreach($categories as $cat)
                         @php $q = $cat->questions->get($row); @endphp
                         @if($q)
-                            @php $isRevealed = in_array($q->id, $revealedIds); @endphp
-                            <div class="py-4 rounded-xl text-center font-extrabold text-lg
-                                        {{ $isRevealed
-                                            ? 'bg-blue-950 text-blue-900 opacity-30'
-                                            : 'bg-blue-700 text-yellow-300' }}">
-                                @if(!$isRevealed) ${{ $q->points }} @endif
-                            </div>
+                            @php
+                                $isRevealed  = in_array($q->id, $revealedIds);
+                                $isPending   = $pendingQuestionId === $q->id;
+                            @endphp
+                            @if($isMyTurn && !$isRevealed)
+                                {{-- Clickable for the player whose turn it is --}}
+                                <button wire:click="selectCard({{ $q->id }})"
+                                        class="py-4 rounded-xl text-center font-extrabold text-lg transition-all active:scale-95
+                                               {{ $isPending
+                                                   ? 'bg-green-400 text-blue-900 ring-2 ring-white scale-105'
+                                                   : 'bg-blue-600 text-yellow-300 hover:bg-yellow-400 hover:text-blue-900' }}">
+                                    ${{ $q->points }}
+                                </button>
+                            @else
+                                <div class="py-4 rounded-xl text-center font-extrabold text-lg
+                                            {{ $isRevealed
+                                                ? 'bg-blue-950 text-blue-900 opacity-30'
+                                                : 'bg-blue-700 text-yellow-300' }}">
+                                    @if(!$isRevealed) ${{ $q->points }} @endif
+                                </div>
+                            @endif
                         @else
                             <div class="py-4 rounded-xl bg-blue-950 opacity-20"></div>
                         @endif
@@ -159,26 +235,77 @@
                 </div>
             @endfor
         </div>
+
+        {{-- ── Random card button (only shown on your turn) ── --}}
+        @if($isMyTurn)
+            <div class="px-4 py-3">
+                <button wire:click="selectRandomCard"
+                        class="w-full py-4 rounded-2xl bg-purple-600 hover:bg-purple-500 active:scale-95
+                               text-white font-extrabold text-lg uppercase tracking-widest shadow-lg transition-all
+                               flex items-center justify-center gap-3">
+                    <span class="text-2xl">🎲</span>
+                    Random Card
+                </button>
+            </div>
+        @endif
     @endif
 
-    {{-- ── Sticky footer scoreboard ── --}}
+    {{-- ── Sticky footer: player list + turn indicator ── --}}
     <div class="fixed bottom-0 left-0 right-0 bg-blue-900/95 backdrop-blur border-t border-blue-700 px-4 py-3 z-50">
         <div class="flex gap-3 overflow-x-auto">
             @foreach($session->players->sortByDesc('score') as $p)
-                <div class="flex-shrink-0 text-center min-w-[72px]
-                             {{ $p->id === $playerId ? 'bg-yellow-400/20 ring-2 ring-yellow-400' : 'bg-blue-800' }}
-                             rounded-xl px-3 py-2">
+                @php
+                    $isSelf   = $p->id === $playerId;
+                    $isTurn   = $p->id === $session->current_turn_player_id;
+                @endphp
+                <div class="flex-shrink-0 text-center min-w-[72px] rounded-xl px-3 py-2
+                             {{ $isSelf  ? 'bg-yellow-400/20 ring-2 ring-yellow-400' : 'bg-blue-800' }}
+                             {{ $isTurn  ? 'ring-2 ring-green-400' : '' }}">
                     <p class="text-xs truncate max-w-[72px]
-                               {{ $p->id === $playerId ? 'text-yellow-300 font-semibold' : 'text-blue-300' }}">
-                        {{ $p->id === $playerId ? '★ '.$p->name : $p->name }}
+                               {{ $isSelf ? 'text-yellow-300 font-semibold' : 'text-blue-300' }}">
+                        @if($isTurn) ▶ @elseif($isSelf) ★ @endif{{ $p->name }}
                     </p>
                     <p class="font-bold text-sm
-                               {{ $p->id === $playerId ? 'text-yellow-400' : 'text-yellow-300' }}">
+                               {{ $isSelf ? 'text-yellow-400' : 'text-yellow-300' }}">
                         ${{ number_format($p->score) }}
                     </p>
+                    @if($isTurn)
+                        <p class="text-green-400 text-[10px] font-bold leading-tight">TURN</p>
+                    @endif
                 </div>
             @endforeach
         </div>
     </div>
 
 </div>
+
+@script
+<script>
+    Alpine.data('pixelateImg', (src, level) => ({
+        // Fibonacci steps: 1 2 3 5 8 13 21 34 55 89 100 %
+        levels: [0.01, 0.02, 0.03, 0.05, 0.08, 0.13, 0.21, 0.34, 0.55, 0.89, 1.0],
+        draw() {
+            const canvas = this.$el;
+            const pct    = this.levels[Math.min(level - 1, this.levels.length - 1)];
+            const img    = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                const w = Math.max(1, Math.round(img.naturalWidth  * pct));
+                const h = Math.max(1, Math.round(img.naturalHeight * pct));
+
+                const tmp = document.createElement('canvas');
+                tmp.width  = w;
+                tmp.height = h;
+                tmp.getContext('2d').drawImage(img, 0, 0, w, h);
+
+                canvas.width  = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
+            };
+            img.src = src;
+        },
+    }));
+</script>
+@endscript
