@@ -8,13 +8,13 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class QuestionRevealed implements ShouldBroadcastNow
+class GuessSubmitted implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public string $code,
-        public int    $questionId,
+        public int    $playerId,
     ) {}
 
     public function broadcastOn(): Channel
@@ -24,6 +24,6 @@ class QuestionRevealed implements ShouldBroadcastNow
 
     public function broadcastAs(): string
     {
-        return 'QuestionRevealed';
+        return 'GuessSubmitted';
     }
 }

@@ -3,17 +3,15 @@
 namespace App\Events\Jeopardy;
 
 use Illuminate\Broadcasting\Channel;
-use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
-use Illuminate\Foundation\Events\Dispatchable;
-use Illuminate\Queue\SerializesModels;
 
-class ScoreUpdated implements ShouldBroadcastNow
+class ClickVoted implements ShouldBroadcastNow
 {
-    use Dispatchable, InteractsWithSockets, SerializesModels;
-
     public function __construct(
-        public string $code,
+        public readonly string $code,
+        public readonly int    $playerId,
+        public readonly float  $xPct,
+        public readonly float  $yPct,
     ) {}
 
     public function broadcastOn(): Channel
@@ -23,6 +21,6 @@ class ScoreUpdated implements ShouldBroadcastNow
 
     public function broadcastAs(): string
     {
-        return 'ScoreUpdated';
+        return 'ClickVoted';
     }
 }

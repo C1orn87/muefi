@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-[#042B7F] text-white px-6 py-10 flex flex-col items-center" wire:poll.3000ms>
+<div class="min-h-screen bg-[#042B7F] text-white px-6 py-10 flex flex-col items-center" wire:poll.2000ms>
 
     <h1 class="text-4xl font-extrabold tracking-widest text-yellow-400 uppercase mb-2" style="font-family:serif;">
         Jeopardy!
@@ -17,16 +17,25 @@
     {{-- Players & teams --}}
     <div class="w-full max-w-2xl grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
 
+        @php $isHost = auth()->check() && auth()->id() === $session->host_id; @endphp
+
         {{-- Solo players --}}
-        @php $soloPlayers = $session->players->whereNull('team_id'); @endphp
+        @php $soloPlayers = $session->players->whereNull('team_id')->where('is_kicked', false); @endphp
         @if($soloPlayers->isNotEmpty())
             <div class="bg-blue-800 rounded-2xl p-5">
                 <h3 class="text-yellow-400 font-bold uppercase tracking-wide text-sm mb-3">Solo Players</h3>
                 <ul class="space-y-2">
                     @foreach($soloPlayers as $player)
                         <li class="flex items-center gap-2">
-                            <span class="w-2 h-2 rounded-full bg-green-400"></span>
-                            <span>{{ $player->name }}</span>
+                            <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+                            <span class="flex-1">{{ $player->name }}</span>
+                            @if($isHost)
+                                <button wire:click="kickPlayer({{ $player->id }})"
+                                        onclick="return confirm('Kick {{ $player->name }}?')"
+                                        class="text-[10px] px-2 py-0.5 rounded-lg bg-red-700 hover:bg-red-600 text-white font-semibold flex-shrink-0">
+                                    Kick
+                                </button>
+                            @endif
                         </li>
                     @endforeach
                 </ul>
@@ -40,10 +49,17 @@
                     Team: {{ $team->name }}
                 </h3>
                 <ul class="space-y-2">
-                    @foreach($team->players as $player)
+                    @foreach($team->players->where('is_kicked', false) as $player)
                         <li class="flex items-center gap-2">
-                            <span class="w-2 h-2 rounded-full bg-green-400"></span>
-                            <span>{{ $player->name }}</span>
+                            <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+                            <span class="flex-1">{{ $player->name }}</span>
+                            @if($isHost)
+                                <button wire:click="kickPlayer({{ $player->id }})"
+                                        onclick="return confirm('Kick {{ $player->name }}?')"
+                                        class="text-[10px] px-2 py-0.5 rounded-lg bg-red-700 hover:bg-red-600 text-white font-semibold flex-shrink-0">
+                                    Kick
+                                </button>
+                            @endif
                         </li>
                     @endforeach
                 </ul>

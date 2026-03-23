@@ -5,13 +5,19 @@ namespace App\Livewire\Jeopardy;
 use App\Events\Jeopardy\GameStateUpdated;
 use App\Events\Jeopardy\QuestionRevealed;
 use App\Events\Jeopardy\ScoreUpdated;
+use App\Livewire\Concerns\BroadcastsSafely;
 use App\Models\JeopardyBuzz;
+use App\Models\JeopardyChoiceVote;
+use App\Models\JeopardyClickVote;
+use App\Models\JeopardyPlayer;
 use App\Models\JeopardySession;
 use App\Models\JeopardySessionQuestion;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 class GameHost extends Component
 {
+    use BroadcastsSafely;
     public string $code;
     public JeopardySession $session;
 
@@ -39,8 +45,12 @@ class GameHost extends Component
             ['is_revealed' => true, 'pixelate_level' => 1]
         );
 
-        // Clear buzzes and reset all flags for the fresh question
+        // Clear buzzes, choice votes, and hotspot clicks for the fresh question
         $this->session->buzzes()->where('question_id', $questionId)->delete();
+        JeopardyChoiceVote::where('session_id', $this->session->id)
+            ->where('question_id', $questionId)->delete();
+        JeopardyClickVote::where('session_id', $this->session->id)
+            ->where('question_id', $questionId)->delete();
 
         $this->session->update([
             'active_question_id'  => $questionId,
@@ -54,7 +64,7 @@ class GameHost extends Component
         $this->activeQuestionId = $questionId;
         $this->showAnswer       = false;
 
-        event(new QuestionRevealed($this->session->code, $questionId));
+        $this->broadcast(new QuestionRevealed($this->session->code, $questionId));
     }
 
     public function closeQuestion(): void
@@ -74,7 +84,7 @@ class GameHost extends Component
         // Auto-advance to the next player's turn
         $this->advanceTurn();
 
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     // ── Turn management ────────────────────────────────────────────────────────
@@ -99,7 +109,7 @@ class GameHost extends Component
         ]);
         $this->session->refresh();
 
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     /** Host manually sets whose turn it is. */
@@ -111,7 +121,7 @@ class GameHost extends Component
         ]);
         $this->session->refresh();
 
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     // ── Hints ──────────────────────────────────────────────────────────────────
@@ -128,7 +138,7 @@ class GameHost extends Component
         if ($this->session->revealed_hint_count < count($hints)) {
             $this->session->increment('revealed_hint_count');
             $this->session->refresh();
-            event(new GameStateUpdated($this->session->code, 'active'));
+            $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
         }
     }
 
@@ -145,12 +155,12 @@ class GameHost extends Component
             ->where('question_id', $this->session->active_question_id)
             ->first();
 
-        if ($sq && $sq->pixelate_level < 11) { // 11 Fibonacci steps (1→100%)
+        if ($sq && $sq->pixelate_level < 6) { // 6 steps: 5→20→80→320→1280px (×4 each)
             $sq->update(['pixelate_level' => $sq->pixelate_level + 1]);
         }
 
         $this->session->refresh();
-        event(new QuestionRevealed($this->session->code, $this->session->active_question_id));
+        $this->broadcast(new QuestionRevealed($this->session->code, $this->session->active_question_id));
     }
 
     // ── Answer reveal ──────────────────────────────────────────────────────────
@@ -159,7 +169,7 @@ class GameHost extends Component
     {
         $this->showAnswer = ! $this->showAnswer;
         $this->session->update(['show_answer' => $this->showAnswer]);
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
@@ -176,7 +186,7 @@ class GameHost extends Component
             $sq->update(['zoom_level' => $sq->zoom_level - 1]);
         }
         $this->session->refresh();
-        event(new QuestionRevealed($this->session->code, $this->session->active_question_id));
+        $this->broadcast(new QuestionRevealed($this->session->code, $this->session->active_question_id));
     }
 
     // ── Buzzer ────────────────────────────────────────────────────────────────
@@ -189,7 +199,7 @@ class GameHost extends Component
         }
         $this->session->update(['buzzer_open' => true]);
         $this->session->refresh();
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     /** Host manually reopens buzzer — clears existing buzzes for a fresh round */
@@ -203,7 +213,7 @@ class GameHost extends Component
             ->delete();
         $this->session->update(['buzzer_open' => true]);
         $this->session->refresh();
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     // ── Scoring ───────────────────────────────────────────────────────────────
@@ -234,7 +244,7 @@ class GameHost extends Component
         }
 
         $this->session->refresh();
-        event(new ScoreUpdated($this->session->code));
+        $this->broadcast(new ScoreUpdated($this->session->code));
     }
 
     // ── Game end ──────────────────────────────────────────────────────────────
@@ -249,7 +259,34 @@ class GameHost extends Component
         ]);
         $this->session->refresh();
         $this->activeQuestionId = null;
-        event(new GameStateUpdated($this->session->code, 'finished'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'finished'));
+    }
+
+    // ── Player management ─────────────────────────────────────────────────────
+
+    public function kickPlayer(int $playerId): void
+    {
+        JeopardyPlayer::where('id', $playerId)
+            ->where('session_id', $this->session->id)
+            ->update(['is_kicked' => true]);
+
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
+    }
+
+    // ── Reverb hooks ──────────────────────────────────────────────────────────
+
+    #[On('echo:jeopardy.{code},BuzzerPressed')]
+    #[On('echo:jeopardy.{code},GameStateUpdated')]
+    #[On('echo:jeopardy.{code},QuestionRevealed')]
+    #[On('echo:jeopardy.{code},ScoreUpdated')]
+    #[On('echo:jeopardy.{code},ChoiceVoted')]
+    #[On('echo:jeopardy.{code},GuessSubmitted')]
+    #[On('echo:jeopardy.{code},ClickVoted')]
+    public function refresh(): void
+    {
+        $this->session->refresh();
+        $this->activeQuestionId = $this->session->active_question_id;
+        $this->showAnswer       = (bool) ($this->session->show_answer ?? false);
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -285,11 +322,42 @@ class GameHost extends Component
                 ->values()
             : collect();
 
+        // Vote tallies for multiple_choice and duel
+        $votesByChoice = collect();
+        $totalVotes    = 0;
+        $playerVotes   = collect(); // keyed by player_id => choice_index
+
+        $aqType    = $this->session->activeQuestion?->question_type;
+        $aqChoices = $this->session->activeQuestion?->choices;
+        $needsVotes = $this->session->active_question_id
+            && ($aqType === 'duel' || (!empty($aqChoices) && $aqType !== 'duel'));
+
+        if ($needsVotes) {
+            $allVotes = JeopardyChoiceVote::where('session_id', $this->session->id)
+                ->where('question_id', $this->session->active_question_id)
+                ->with('player')
+                ->get();
+
+            $totalVotes    = $allVotes->count();
+            $votesByChoice = $allVotes->groupBy('choice_index')
+                ->map(fn ($group) => $group->values());
+            $playerVotes   = $allVotes->keyBy('player_id');
+        }
+
+        // Click vote heatmap for image_hotspot questions
+        $clickVotes = ($this->session->activeQuestion?->question_type === 'image_hotspot')
+            ? JeopardyClickVote::where('session_id', $this->session->id)
+                ->where('question_id', $this->session->active_question_id)
+                ->with('player')
+                ->get()
+            : collect();
+
         $pendingQuestion   = $this->session->pendingQuestion;
         $currentTurnPlayer = $this->session->currentTurnPlayer;
 
         return view('livewire.jeopardy.game-host', compact(
-            'revealedIds', 'buzzes', 'guesses', 'pendingQuestion', 'currentTurnPlayer'
+            'revealedIds', 'buzzes', 'guesses', 'pendingQuestion', 'currentTurnPlayer',
+            'votesByChoice', 'totalVotes', 'playerVotes', 'clickVotes'
         ));
     }
 }

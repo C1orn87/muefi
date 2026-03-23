@@ -7,7 +7,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class JeopardyPlayer extends Model
 {
-    protected $fillable = ['session_id', 'user_id', 'name', 'score', 'team_id'];
+    protected $fillable = ['session_id', 'user_id', 'name', 'score', 'team_id', 'is_kicked'];
+
+    protected $casts = ['is_kicked' => 'boolean'];
 
     public function session(): BelongsTo
     {

@@ -2,8 +2,15 @@
 
 namespace App\Livewire\Jeopardy;
 
+use App\Events\Jeopardy\BuzzerPressed;
+use App\Events\Jeopardy\ChoiceVoted;
+use App\Events\Jeopardy\ClickVoted;
 use App\Events\Jeopardy\GameStateUpdated;
+use App\Events\Jeopardy\GuessSubmitted;
+use App\Livewire\Concerns\BroadcastsSafely;
 use App\Models\JeopardyBuzz;
+use App\Models\JeopardyChoiceVote;
+use App\Models\JeopardyClickVote;
 use App\Models\JeopardyGuess;
 use App\Models\JeopardyPlayer;
 use App\Models\JeopardySession;
@@ -12,6 +19,7 @@ use Livewire\Component;
 
 class GamePlayer extends Component
 {
+    use BroadcastsSafely;
     public string $code;
     public int    $playerId;
     public JeopardySession $session;
@@ -61,6 +69,8 @@ class GamePlayer extends Component
             'buzz_order'  => $order,
             'buzzed_at'   => now(),
         ]);
+
+        $this->broadcast(new BuzzerPressed($this->session->code, $this->playerId, $order));
     }
 
     // ── Card selection (turn system) ──────────────────────────────────────────
@@ -85,7 +95,7 @@ class GamePlayer extends Component
         $this->session->update(['pending_question_id' => $questionId]);
         $this->session->refresh();
 
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     public function selectRandomCard(): void
@@ -112,7 +122,7 @@ class GamePlayer extends Component
         $this->session->update(['pending_question_id' => $random->id]);
         $this->session->refresh();
 
-        event(new GameStateUpdated($this->session->code, 'active'));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
     }
 
     // ── Number guess ──────────────────────────────────────────────────────────
@@ -138,6 +148,62 @@ class GamePlayer extends Component
                 'submitted_at' => now(),
             ]
         );
+
+        $this->broadcast(new GuessSubmitted($this->session->code, $this->playerId));
+        $this->broadcast(new GameStateUpdated($this->session->code, 'active'));
+    }
+
+    // ── Multiple choice / duel vote ───────────────────────────────────────────
+
+    public function submitChoice(int $choiceIndex): void
+    {
+        $this->session->refresh();
+
+        if (! $this->session->active_question_id) {
+            return;
+        }
+
+        JeopardyChoiceVote::updateOrCreate(
+            [
+                'session_id'  => $this->session->id,
+                'question_id' => $this->session->active_question_id,
+                'player_id'   => $this->playerId,
+            ],
+            [
+                'choice_index' => $choiceIndex,
+            ]
+        );
+
+        $this->broadcast(new ChoiceVoted($this->session->code, $this->playerId, $choiceIndex));
+    }
+
+    // ── Hotspot click ─────────────────────────────────────────────────────────
+
+    public function submitHotspot(float $xPct, float $yPct): void
+    {
+        $this->session->refresh();
+
+        if (! $this->session->active_question_id) {
+            return;
+        }
+
+        // Clamp to 0–100
+        $xPct = max(0.0, min(100.0, $xPct));
+        $yPct = max(0.0, min(100.0, $yPct));
+
+        JeopardyClickVote::updateOrCreate(
+            [
+                'session_id'  => $this->session->id,
+                'question_id' => $this->session->active_question_id,
+                'player_id'   => $this->playerId,
+            ],
+            [
+                'x_pct' => $xPct,
+                'y_pct' => $yPct,
+            ]
+        );
+
+        $this->broadcast(new ClickVoted($this->session->code, $this->playerId, $xPct, $yPct));
     }
 
     // ── Reverb hooks ──────────────────────────────────────────────────────────
@@ -145,6 +211,8 @@ class GamePlayer extends Component
     #[On('echo:jeopardy.{code},QuestionRevealed')]
     #[On('echo:jeopardy.{code},ScoreUpdated')]
     #[On('echo:jeopardy.{code},GameStateUpdated')]
+    #[On('echo:jeopardy.{code},ChoiceVoted')]
+    #[On('echo:jeopardy.{code},ClickVoted')]
     public function refresh(): void
     {
         $this->session->refresh();
@@ -165,6 +233,12 @@ class GamePlayer extends Component
             'pendingQuestion',
         ]);
         $this->player?->refresh();
+
+        // Redirect kicked players to the join page
+        if ($this->player?->is_kicked) {
+            $this->redirect(route('games.jeopardy.join', $this->code));
+            return view('livewire.jeopardy.game-player', ['kicked' => true]);
+        }
 
         $revealedIds = $this->session->revealedQuestionIds();
 
@@ -198,13 +272,36 @@ class GamePlayer extends Component
                 ->value('guess')
             : null;
 
-        $isMyTurn         = $this->session->current_turn_player_id === $this->playerId;
+        $isMyTurn          = $this->session->current_turn_player_id === $this->playerId;
         $currentTurnPlayer = $this->session->currentTurnPlayer;
         $pendingQuestionId = $this->session->pending_question_id;
 
+        // Has this player voted on a choice/duel question?
+        $myVote = $this->session->active_question_id
+            ? JeopardyChoiceVote::where('session_id', $this->session->id)
+                ->where('question_id', $this->session->active_question_id)
+                ->where('player_id', $this->playerId)
+                ->first()
+            : null;
+
+        $hasVoted    = $myVote !== null;
+        $myVoteIndex = $myVote?->choice_index;
+
+        // Hotspot click — has this player already placed a dot?
+        $myHotspot = ($this->session->activeQuestion?->question_type === 'image_hotspot' && $this->session->active_question_id)
+            ? JeopardyClickVote::where('session_id', $this->session->id)
+                ->where('question_id', $this->session->active_question_id)
+                ->where('player_id', $this->playerId)
+                ->first()
+            : null;
+        $hasClickedHotspot = $myHotspot !== null;
+
+        $kicked = false;
+
         return view('livewire.jeopardy.game-player', compact(
             'revealedIds', 'hasBuzzed', 'myBuzzOrder', 'hasGuessed', 'myGuess',
-            'isMyTurn', 'currentTurnPlayer', 'pendingQuestionId'
+            'isMyTurn', 'currentTurnPlayer', 'pendingQuestionId',
+            'hasVoted', 'myVoteIndex', 'hasClickedHotspot', 'myHotspot', 'kicked'
         ));
     }
 }

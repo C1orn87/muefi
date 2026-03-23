@@ -1,7 +1,16 @@
-<div class="min-h-screen bg-[#042B7F] text-white flex flex-col pb-24" wire:poll.2000ms>
+<div class="min-h-screen bg-[#042B7F] text-white flex flex-col pb-24"
+     wire:poll.2000ms="refresh">
+
+    {{-- ── Kicked ── --}}
+    @if($kicked ?? false)
+        <div class="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+            <p class="text-5xl">🚫</p>
+            <p class="text-red-400 text-2xl font-extrabold">You've been removed</p>
+            <p class="text-blue-300 text-sm">The host has removed you from this game.</p>
+        </div>
 
     {{-- ── Game finished ── --}}
-    @if($session->status === 'finished')
+    @elseif($session->status === 'finished')
         <div class="flex-1 flex flex-col items-center justify-center gap-6 p-4">
             <p class="text-4xl font-extrabold text-yellow-400">Game Over!</p>
             <div class="bg-blue-800 rounded-2xl p-6 w-full max-w-sm">
@@ -87,6 +96,33 @@
                         <iframe src="{{ $embedUrl }}" class="w-full h-48 rounded-xl"
                                 allow="autoplay; encrypted-media" allowfullscreen></iframe>
                     @endif
+
+                @elseif($aq->question_type === 'image_hotspot')
+                    {{-- Tappable image — click records x/y as percentage coordinates --}}
+                    <div class="relative cursor-crosshair select-none"
+                         wire:key="hotspot-player-{{ $aq->id }}"
+                         x-data="hotspotTap($wire)"
+                         @click="tap($event)">
+                        <img src="{{ Storage::url($aq->media_path) }}"
+                             alt="Click on the image"
+                             id="hotspot-player-img"
+                             class="rounded-xl w-full object-contain"
+                             draggable="false">
+                        {{-- Show placed dot --}}
+                        @if($hasClickedHotspot)
+                            <div style="position:absolute; left:{{ $myHotspot->x_pct }}%; top:{{ $myHotspot->y_pct }}%;
+                                        width:20px; height:20px; border-radius:50%;
+                                        background:#FFE66D; border:3px solid #042B7F;
+                                        transform:translate(-50%,-50%); box-shadow:0 0 6px rgba(0,0,0,.5);
+                                        pointer-events:none;">
+                            </div>
+                        @endif
+                    </div>
+                    @if($hasClickedHotspot)
+                        <p class="text-green-400 text-sm text-center font-semibold mt-1">📍 Tap again to move your dot</p>
+                    @else
+                        <p class="text-blue-300 text-sm text-center mt-1">Tap anywhere on the image</p>
+                    @endif
                 @endif
             </div>
 
@@ -105,8 +141,98 @@
                 </div>
             @endif
 
-            {{-- ── Buzzer button ── --}}
-            @if($aq->question_type !== 'number_guess')
+            {{-- ── Multiple Choice ── --}}
+            @if(!empty($aq->choices) && $aq->question_type !== 'duel')
+                @php $choices = $aq->choices ?? []; @endphp
+                @if($hasVoted)
+                    <div class="w-full max-w-lg space-y-2">
+                        @foreach($choices as $cIdx => $choiceLabel)
+                            <div class="flex items-center gap-3 rounded-2xl px-5 py-3
+                                        {{ $cIdx === $myVoteIndex ? 'bg-yellow-400 text-blue-900' : 'bg-blue-800 text-blue-300' }}">
+                                <span class="font-extrabold text-lg w-7 text-center flex-shrink-0">{{ chr(65 + $cIdx) }}</span>
+                                <span class="text-sm font-medium">{{ $choiceLabel }}</span>
+                                @if($cIdx === $myVoteIndex)
+                                    <span class="ml-auto text-blue-900 font-bold text-xs">✓ Your pick</span>
+                                @endif
+                            </div>
+                        @endforeach
+                        <p class="text-blue-400 text-xs text-center pt-1">Waiting for results…</p>
+                    </div>
+                @else
+                    <div class="w-full max-w-lg space-y-2">
+                        <p class="text-blue-300 text-sm text-center mb-1">Choose your answer:</p>
+                        @foreach($choices as $cIdx => $choiceLabel)
+                            <button wire:click="submitChoice({{ $cIdx }})"
+                                    class="w-full flex items-center gap-3 rounded-2xl px-5 py-4 bg-blue-700 hover:bg-yellow-400 hover:text-blue-900 text-white transition-all active:scale-95 group">
+                                <span class="font-extrabold text-xl w-7 text-center flex-shrink-0 text-yellow-400 group-hover:text-blue-900">
+                                    {{ chr(65 + $cIdx) }}
+                                </span>
+                                <span class="text-sm font-semibold">{{ $choiceLabel }}</span>
+                            </button>
+                        @endforeach
+                    </div>
+                @endif
+            @endif
+
+            {{-- ── Duel (image vote) ── --}}
+            @if($aq->question_type === 'duel')
+                @php
+                    $duelPaths    = $aq->media_paths ?? [];
+                    $duelCaptions = $aq->choices      ?? [];
+                    $slotCount    = count($duelPaths);
+                @endphp
+                @if($hasVoted)
+                    <div class="w-full px-2">
+                        <div class="flex gap-2">
+                            @foreach($duelPaths as $sIdx => $duelPath)
+                                <div class="relative flex-1 min-w-0 rounded-2xl overflow-hidden
+                                            {{ $sIdx === $myVoteIndex ? 'ring-4 ring-yellow-400' : 'opacity-50' }}"
+                                     style="height: min(calc(50vw - 0.5rem), 44vh)">
+                                    <img src="{{ Storage::url($duelPath) }}"
+                                         alt="Option {{ $sIdx + 1 }}"
+                                         class="absolute inset-0 w-full h-full object-cover">
+                                    @if(!empty($duelCaptions[$sIdx]))
+                                        <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs text-center py-1 px-2 font-semibold">
+                                            {{ $duelCaptions[$sIdx] }}
+                                        </div>
+                                    @endif
+                                    @if($sIdx === $myVoteIndex)
+                                        <div class="absolute top-2 right-2 bg-yellow-400 text-blue-900 rounded-full w-7 h-7 flex items-center justify-center font-extrabold text-xs shadow">
+                                            ✓
+                                        </div>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                        <p class="text-blue-400 text-xs text-center pt-3">Voted! Waiting for results…</p>
+                    </div>
+                @else
+                    <div class="w-full px-2">
+                        <p class="text-blue-300 text-sm text-center mb-2">Tap an image to vote:</p>
+                        <div class="flex gap-2">
+                            @foreach($duelPaths as $sIdx => $duelPath)
+                                <button wire:click="submitChoice({{ $sIdx }})"
+                                        class="relative flex-1 min-w-0 rounded-2xl overflow-hidden
+                                               active:scale-95 transition-transform
+                                               hover:ring-4 hover:ring-yellow-400 focus:outline-none"
+                                        style="height: min(calc(50vw - 0.5rem), 44vh)">
+                                    <img src="{{ Storage::url($duelPath) }}"
+                                         alt="Option {{ $sIdx + 1 }}"
+                                         class="absolute inset-0 w-full h-full object-cover">
+                                    @if(!empty($duelCaptions[$sIdx]))
+                                        <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs text-center py-1 px-2 font-semibold">
+                                            {{ $duelCaptions[$sIdx] }}
+                                        </div>
+                                    @endif
+                                </button>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+            @endif
+
+            {{-- ── Buzzer button (standard types with no choices and not duel/number_guess) ── --}}
+            @if($aq->question_type !== 'number_guess' && $aq->question_type !== 'duel' && empty($aq->choices))
                 @if($session->buzzer_open)
                     @if($hasBuzzed)
                         <div class="text-center">
@@ -281,25 +407,48 @@
 
 @script
 <script>
+    Alpine.data('hotspotTap', (wire) => ({
+        tap(event) {
+            const el   = event.currentTarget;
+            const img  = el.querySelector('img');
+            const rect = img.getBoundingClientRect();
+            const x    = ((event.clientX - rect.left) / rect.width)  * 100;
+            const y    = ((event.clientY - rect.top)  / rect.height) * 100;
+            wire.submitHotspot(
+                Math.max(0, Math.min(100, parseFloat(x.toFixed(2)))),
+                Math.max(0, Math.min(100, parseFloat(y.toFixed(2))))
+            );
+        },
+    }));
+
     Alpine.data('pixelateImg', (src, level) => ({
-        // Fibonacci steps: 1 2 3 5 8 13 21 34 55 89 100 %
-        levels: [0.01, 0.02, 0.03, 0.05, 0.08, 0.13, 0.21, 0.34, 0.55, 0.89, 1.0],
+        // Resolution: 5 → 20 → 80 → 320 → 1280 px (×4 each step)
         draw() {
             const canvas = this.$el;
-            const pct    = this.levels[Math.min(level - 1, this.levels.length - 1)];
             const img    = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
-                const w = Math.max(1, Math.round(img.naturalWidth  * pct));
-                const h = Math.max(1, Math.round(img.naturalHeight * pct));
+                canvas.width  = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+
+                const res     = Math.round(5 * Math.pow(4, level - 1));
+                const longest = Math.max(img.naturalWidth, img.naturalHeight);
+
+                if (res >= longest) {
+                    // Full resolution — no pixelation needed
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                    return;
+                }
+
+                const scale = res / longest;
+                const w = Math.max(1, Math.round(img.naturalWidth  * scale));
+                const h = Math.max(1, Math.round(img.naturalHeight * scale));
 
                 const tmp = document.createElement('canvas');
                 tmp.width  = w;
                 tmp.height = h;
                 tmp.getContext('2d').drawImage(img, 0, 0, w, h);
 
-                canvas.width  = img.naturalWidth;
-                canvas.height = img.naturalHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.imageSmoothingEnabled = false;
                 ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
