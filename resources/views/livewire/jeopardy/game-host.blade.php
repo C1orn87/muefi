@@ -202,14 +202,17 @@
                             @endif
 
                         @elseif($aq->question_type === 'image_hotspot')
-                            {{-- Image with coloured dot overlay per player click --}}
-                            <div class="relative rounded-lg overflow-hidden"
-                                 style="max-height:200px"
+                            {{-- Image with coloured dot overlay per player click.
+                                 No height cap or overflow-hidden: the container must wrap the
+                                 image exactly so that left/top % dots align with the player's
+                                 click coords, which were also recorded relative to the full
+                                 rendered image. object-contain with a fixed height would add
+                                 letterboxing and shift every dot. --}}
+                            <div class="relative rounded-lg"
                                  wire:key="hotspot-{{ $aq->id }}-{{ $clickVotes->count() }}">
                                 <img src="{{ Storage::url($aq->media_path) }}"
                                      alt="Hotspot image"
-                                     id="hotspot-host-img-{{ $aq->id }}"
-                                     class="w-full object-contain rounded-lg">
+                                     class="w-full block rounded-lg">
                                 {{-- Coloured dots for each player click --}}
                                 @foreach($clickVotes as $cv)
                                     @php
@@ -421,11 +424,10 @@
                                     $voters = $votesByChoice->get($sIdx) ?? collect();
                                 @endphp
                                 <div class="flex-1 min-w-0 flex flex-col gap-1">
-                                    <div class="relative rounded-xl overflow-hidden"
-                                         style="height: min(calc(50vw - 0.5rem), 30vh)">
+                                    <div class="relative rounded-xl overflow-hidden">
                                         <img src="{{ Storage::url($duelPath) }}"
                                              alt="Option {{ $sIdx + 1 }}"
-                                             class="absolute inset-0 w-full h-full object-cover">
+                                             class="w-full block rounded-xl">
                                         {{-- Vote count badge --}}
                                         <div class="absolute top-1.5 right-1.5 bg-yellow-400 text-blue-900 font-extrabold text-xs rounded-full min-w-[22px] h-[22px] flex items-center justify-center px-1 shadow">
                                             {{ $count }}
@@ -484,7 +486,7 @@
                 @endif
 
                 {{-- Solo players --}}
-                @php $soloPlayers = $session->players->whereNull('team_id'); @endphp
+                @php $soloPlayers = $session->players->whereNull('team_id')->where('is_kicked', false); @endphp
                 @foreach($soloPlayers as $player)
                     @php $isTurn = $player->id === $session->current_turn_player_id; @endphp
                     <div class="flex items-center justify-between mb-2 rounded-xl px-3 py-2
@@ -530,35 +532,29 @@
                             <span class="text-yellow-400 text-xs font-bold uppercase tracking-wide">{{ $team->name }}</span>
                             <span class="text-yellow-300 font-bold">${{ number_format($team->score) }}</span>
                         </div>
-                        @foreach($team->players as $player)
+                        @foreach($team->players->where('is_kicked', false) as $player)
                             @php $isTurn = $player->id === $session->current_turn_player_id; @endphp
                             <div class="flex items-center justify-between ml-3 mb-1 rounded-xl px-3 py-1.5
-                                        {{ $isTurn ? 'bg-green-700/40 ring-1 ring-green-500' : 'bg-blue-700' }}
-                                        {{ $player->is_kicked ? 'opacity-40' : '' }}">
+                                        {{ $isTurn ? 'bg-green-700/40 ring-1 ring-green-500' : 'bg-blue-700' }}">
                                 <div class="flex items-center gap-1 min-w-0">
                                     @if($isTurn) <span class="text-green-400 text-xs flex-shrink-0">▶</span> @endif
                                     <span class="text-xs truncate">{{ $player->name }}</span>
-                                    @if($player->is_kicked) <span class="text-red-400 text-[10px] font-bold flex-shrink-0">kicked</span> @endif
                                 </div>
                                 <div class="flex items-center gap-1 flex-shrink-0">
-                                    @if(!$isTurn && !$player->is_kicked)
+                                    @if(!$isTurn)
                                         <button wire:click="setTurn({{ $player->id }})"
                                                 title="Set turn"
                                                 class="w-5 h-5 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[10px] font-bold">▶</button>
                                     @endif
-                                    @if(!$player->is_kicked)
-                                        <button wire:click="adjustPlayerScore({{ $player->id }}, '-')"
-                                                class="w-6 h-6 rounded-lg bg-red-600 hover:bg-red-500 font-bold text-xs">−</button>
-                                        <span class="text-yellow-300 font-bold text-xs w-12 text-center">${{ number_format($player->score) }}</span>
-                                        <button wire:click="adjustPlayerScore({{ $player->id }}, '+')"
-                                                class="w-6 h-6 rounded-lg bg-green-600 hover:bg-green-500 font-bold text-xs">+</button>
-                                        <button wire:click="kickPlayer({{ $player->id }})"
-                                                onclick="return confirm('Kick {{ $player->name }}?')"
-                                                title="Kick player"
-                                                class="w-6 h-6 rounded-lg bg-gray-600 hover:bg-red-700 text-white text-[10px] font-bold">✕</button>
-                                    @else
-                                        <span class="text-yellow-300 font-bold text-xs w-12 text-center">${{ number_format($player->score) }}</span>
-                                    @endif
+                                    <button wire:click="adjustPlayerScore({{ $player->id }}, '-')"
+                                            class="w-6 h-6 rounded-lg bg-red-600 hover:bg-red-500 font-bold text-xs">−</button>
+                                    <span class="text-yellow-300 font-bold text-xs w-12 text-center">${{ number_format($player->score) }}</span>
+                                    <button wire:click="adjustPlayerScore({{ $player->id }}, '+')"
+                                            class="w-6 h-6 rounded-lg bg-green-600 hover:bg-green-500 font-bold text-xs">+</button>
+                                    <button wire:click="kickPlayer({{ $player->id }})"
+                                            onclick="return confirm('Kick {{ $player->name }}?')"
+                                            title="Kick player"
+                                            class="w-6 h-6 rounded-lg bg-gray-600 hover:bg-red-700 text-white text-[10px] font-bold">✕</button>
                                 </div>
                             </div>
                         @endforeach

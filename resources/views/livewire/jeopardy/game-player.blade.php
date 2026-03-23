@@ -105,8 +105,7 @@
                          @click="tap($event)">
                         <img src="{{ Storage::url($aq->media_path) }}"
                              alt="Click on the image"
-                             id="hotspot-player-img"
-                             class="rounded-xl w-full object-contain"
+                             class="rounded-xl w-full block"
                              draggable="false">
                         {{-- Show placed dot --}}
                         @if($hasClickedHotspot)
@@ -183,14 +182,13 @@
                 @endphp
                 @if($hasVoted)
                     <div class="w-full px-2">
-                        <div class="flex gap-2">
+                        <div class="flex gap-2 items-start">
                             @foreach($duelPaths as $sIdx => $duelPath)
                                 <div class="relative flex-1 min-w-0 rounded-2xl overflow-hidden
-                                            {{ $sIdx === $myVoteIndex ? 'ring-4 ring-yellow-400' : 'opacity-50' }}"
-                                     style="height: min(calc(50vw - 0.5rem), 44vh)">
+                                            {{ $sIdx === $myVoteIndex ? 'ring-4 ring-yellow-400' : 'opacity-50' }}">
                                     <img src="{{ Storage::url($duelPath) }}"
                                          alt="Option {{ $sIdx + 1 }}"
-                                         class="absolute inset-0 w-full h-full object-cover">
+                                         class="w-full block rounded-2xl">
                                     @if(!empty($duelCaptions[$sIdx]))
                                         <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs text-center py-1 px-2 font-semibold">
                                             {{ $duelCaptions[$sIdx] }}
@@ -209,16 +207,15 @@
                 @else
                     <div class="w-full px-2">
                         <p class="text-blue-300 text-sm text-center mb-2">Tap an image to vote:</p>
-                        <div class="flex gap-2">
+                        <div class="flex gap-2 items-start">
                             @foreach($duelPaths as $sIdx => $duelPath)
                                 <button wire:click="submitChoice({{ $sIdx }})"
                                         class="relative flex-1 min-w-0 rounded-2xl overflow-hidden
                                                active:scale-95 transition-transform
-                                               hover:ring-4 hover:ring-yellow-400 focus:outline-none"
-                                        style="height: min(calc(50vw - 0.5rem), 44vh)">
+                                               hover:ring-4 hover:ring-yellow-400 focus:outline-none">
                                     <img src="{{ Storage::url($duelPath) }}"
                                          alt="Option {{ $sIdx + 1 }}"
-                                         class="absolute inset-0 w-full h-full object-cover">
+                                         class="w-full block rounded-2xl pointer-events-none">
                                     @if(!empty($duelCaptions[$sIdx]))
                                         <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs text-center py-1 px-2 font-semibold">
                                             {{ $duelCaptions[$sIdx] }}

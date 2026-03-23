@@ -1,3 +1,7 @@
+@assets
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js" defer></script>
+@endassets
+
 <div class="py-10 px-4 space-y-6">
 
     {{-- ── Header ── --}}
@@ -39,17 +43,33 @@
 
     {{-- ── Categories (horizontal scroll) ── --}}
     <div class="overflow-x-auto pb-4">
-        <div class="flex gap-4 items-start px-4" style="min-width: max-content;">
+        <div class="flex gap-4 items-start px-4" style="min-width: max-content;"
+             x-data="{}"
+             x-init="
+                 Sortable.create($el, {
+                     animation: 150,
+                     handle: '.cat-drag-handle',
+                     draggable: '[data-cat-idx]',
+                     onEnd(evt) {
+                         const items = [...$el.querySelectorAll(':scope > [data-cat-idx]')];
+                         $wire.reorderCategories(items.map(el => parseInt(el.dataset.catIdx)));
+                     }
+                 });
+             ">
 
             @foreach($categories as $catIdx => $category)
-                <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow p-5 space-y-4 flex-shrink-0 w-80">
+                <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow p-5 space-y-4 flex-shrink-0 w-80"
+                     data-cat-idx="{{ $catIdx }}">
 
                     {{-- Category header --}}
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
-                            <span class="text-xs font-bold uppercase tracking-widest text-teal-600 dark:text-teal-400">
-                                Category {{ $catIdx + 1 }}
-                            </span>
+                            <div class="flex items-center gap-2">
+                                <span class="cat-drag-handle cursor-grab active:cursor-grabbing select-none text-gray-300 dark:text-zinc-600 hover:text-teal-400 text-lg leading-none" title="Drag to reorder">⠿</span>
+                                <span class="text-xs font-bold uppercase tracking-widest text-teal-600 dark:text-teal-400">
+                                    Category {{ $catIdx + 1 }}
+                                </span>
+                            </div>
                             @if(count($categories) > 1)
                                 <button wire:click="removeCategory({{ $catIdx }})"
                                         class="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950">
@@ -64,12 +84,26 @@
                     </div>
 
                     {{-- Questions --}}
-                    <div class="space-y-3">
+                    <div class="space-y-3"
+                         x-data="{}"
+                         x-init="
+                             Sortable.create($el, {
+                                 animation: 150,
+                                 handle: '.q-drag-handle',
+                                 draggable: '[data-q-idx]',
+                                 onEnd(evt) {
+                                     const items = [...$el.querySelectorAll(':scope > [data-q-idx]')];
+                                     $wire.reorderQuestions({{ $catIdx }}, items.map(el => parseInt(el.dataset.qIdx)));
+                                 }
+                             });
+                         ">
                         @foreach($category['questions'] as $qIdx => $question)
-                            <div class="border border-gray-200 dark:border-zinc-700 rounded-xl p-3 space-y-2 bg-gray-50 dark:bg-zinc-900/50">
+                            <div class="border border-gray-200 dark:border-zinc-700 rounded-xl p-3 space-y-2 bg-gray-50 dark:bg-zinc-900/50"
+                                 data-q-idx="{{ $qIdx }}">
 
                                 <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-2">
+                                        <span class="q-drag-handle cursor-grab active:cursor-grabbing select-none text-gray-300 dark:text-zinc-600 hover:text-teal-400 leading-none" title="Drag to reorder">⠿</span>
                                         <span class="text-xs text-gray-400 dark:text-zinc-500 font-medium">Q{{ $qIdx + 1 }}</span>
                                         <span class="text-xs text-gray-400">$</span>
                                         <input wire:model="categories.{{ $catIdx }}.questions.{{ $qIdx }}.points"

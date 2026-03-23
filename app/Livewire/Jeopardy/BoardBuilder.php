@@ -108,6 +108,25 @@ class BoardBuilder extends Component
         array_splice($this->categories, $catIdx, 1);
     }
 
+    /** Called by SortableJS when categories are reordered. $newOrder is [oldIdx, oldIdx, …]. */
+    public function reorderCategories(array $newOrder): void
+    {
+        $reordered = [];
+        foreach ($newOrder as $oldIdx) {
+            $oldIdx = (int) $oldIdx;
+            if (isset($this->categories[$oldIdx])) {
+                $reordered[] = $this->categories[$oldIdx];
+            }
+        }
+        // Re-add any that were somehow missing (safety net)
+        foreach ($this->categories as $idx => $cat) {
+            if (! in_array($idx, array_map('intval', $newOrder), true)) {
+                $reordered[] = $cat;
+            }
+        }
+        $this->categories = array_values($reordered);
+    }
+
     // ── Question management ─────────────────────────────────────────────────────
 
     public function addQuestion(int $catIdx): void
@@ -119,6 +138,42 @@ class BoardBuilder extends Component
     public function removeQuestion(int $catIdx, int $qIdx): void
     {
         array_splice($this->categories[$catIdx]['questions'], $qIdx, 1);
+    }
+
+    /** Called by SortableJS when questions within a category are reordered.
+     *  Question content moves; each row keeps its original price. */
+    public function reorderQuestions(int $catIdx, array $newOrder): void
+    {
+        if (! isset($this->categories[$catIdx])) {
+            return;
+        }
+        $questions = $this->categories[$catIdx]['questions'];
+
+        // Prices belong to the slot, not the content — snapshot them first
+        $slotPrices = array_column($questions, 'points');
+
+        $reordered = [];
+        foreach ($newOrder as $oldIdx) {
+            $oldIdx = (int) $oldIdx;
+            if (isset($questions[$oldIdx])) {
+                $reordered[] = $questions[$oldIdx];
+            }
+        }
+        foreach ($questions as $idx => $q) {
+            if (! in_array($idx, array_map('intval', $newOrder), true)) {
+                $reordered[] = $q;
+            }
+        }
+
+        // Re-pin original slot prices so the board tiers stay intact
+        foreach ($reordered as $pos => &$q) {
+            if (isset($slotPrices[$pos])) {
+                $q['points'] = $slotPrices[$pos];
+            }
+        }
+        unset($q);
+
+        $this->categories[$catIdx]['questions'] = array_values($reordered);
     }
 
     // ── Hint management ─────────────────────────────────────────────────────────
